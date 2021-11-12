@@ -1,0 +1,12 @@
+Metadata-Version: 2.1
+Name: Cron-o
+Version: 0.0.0
+Summary: Cron-o
+Home-page: UNKNOWN
+Author: Gabriel Slomka
+Author-email: gabrielslomka@gmail.com
+License: Apache License, Version 2
+Description: UNKNOWN
+Keywords: distributed cron job scheduler
+Platform: UNKNOWN
+Provides-Extra: python_version<"3.3"
