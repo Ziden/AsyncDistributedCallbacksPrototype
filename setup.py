@@ -27,13 +27,13 @@ setup(
     keywords='distributed cron job scheduler',
     packages=find_packages(),
     include_package_data=True,
-    extras_require={'python_version<"3.3"': ['funcsigs']},
     tests_require=[
-        'funcsigs',
+        'pytest',
+        'pytest-asyncio'
     ],
     test_suite='nose.collector',
     install_requires=[
         'aioredis',
-        'pyrobuf'
+        'asyncio',
     ],
 )
