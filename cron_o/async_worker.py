@@ -3,7 +3,6 @@ from asyncio import Task
 from uuid import UUID, uuid4
 
 
-
 class AsyncWorker:
     worker_id: UUID
     watching_queue: UUID

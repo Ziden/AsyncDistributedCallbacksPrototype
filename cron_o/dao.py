@@ -1,8 +1,5 @@
-import asyncio
 from contextlib import contextmanager, asynccontextmanager
-from enum import Enum
 from typing import Dict, Optional, List
-from uuid import UUID
 
 import aioredis
 from aioredis import Redis
@@ -17,8 +14,10 @@ class RedisKeys:
     # All queues and which node is watching it
     QUEUE_WATCHERS = "queue::node"
     # Fifo list of new calls to be added
-    NEW_CALLS = "calls:list"
-    # Queue sorted sets of scheduled calls
+    NEW_CALLS = "calls:new:list"
+    # Hashmap of all calls
+    CALLS = "calls:all:list"
+
     @staticmethod
     def queue_sorted_set(queue_id: bytes):
         return f"queue:{queue_id}"
@@ -98,27 +97,42 @@ async def get_all_queues() -> Dict[bytes, bytes]:
 
 
 @require_transaction()
-async def add_scheduled_call(queue_id: bytes, scheduled_call: ScheduledCall):
+async def add_scheduled_call(call: ScheduledCall):
+    queue_id = call.queue_id.bytes
     if not await _dao.reader().hexists(RedisKeys.QUEUE_WATCHERS, queue_id):
         await create_queue(queue_id)
+    call_id = call.call_id.bytes
     sorted_set_data = {
-        scheduled_call.call_id.bytes: scheduled_call.call_timestamp_millis
+        call_id: call.call_timestamp_millis
     }
+    await _dao.writer().hset(RedisKeys.CALLS, call_id, call.pack())
     await _dao.writer().zadd(RedisKeys.queue_sorted_set(queue_id), sorted_set_data)
-    await _flag_queue_modified(queue_id)
+    await _flag_queue_modified(queue_id, call_id)
 
 
 async def get_scheduled_calls(queue_id: bytes, min_timestamp: int, max_timestamp: int):
     return await _dao.reader().zrange(RedisKeys.queue_sorted_set(queue_id), min_timestamp, max_timestamp)
 
 
-async def _flag_queue_modified(queue_id: bytes):
+async def _flag_queue_modified(queue_id: bytes, call_id: bytes):
     await _dao.writer().lpush(RedisKeys.NEW_CALLS, queue_id)
-    await _dao.writer().lpush(RedisKeys.NEW_CALLS, queue_id)
+    await _dao.writer().lpush(RedisKeys.queue_modification_list(queue_id), call_id)
+
+
+async def _add_new_call(call: ScheduledCall):
+    pass
 
 
 async def get_modified_queues():
     return await _dao.reader().lrange(RedisKeys.NEW_CALLS, 0, 5)
+
+
+async def get_new_calls_in_queue(queue_id):
+    return await _dao.reader().lrange(RedisKeys.queue_modification_list(queue_id), 0, -1)
+
+
+async def block_until_new_call_received():
+    return await _dao.reader().brpop(RedisKeys.NEW_CALLS, 0, 5)
 
 
 async def create_queue(queue_id: bytes):

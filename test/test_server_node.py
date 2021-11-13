@@ -1,5 +1,3 @@
-import asyncio
-from time import sleep
 from uuid import uuid4
 import pytest
 from cron_o import dao, server_nodes, api

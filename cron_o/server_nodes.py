@@ -41,8 +41,10 @@ async def create_server_node() -> ServerNode:
 
 async def new_calls_listener(node: ServerNode):
     while node.looping:
-        dao.get_scheduled_calls()
-        await asyncio.wait(1)
+        new_call = dao.block_until_new_call_received()
+        async with redis_transaction():
+            pass
+
 
 
 async def _watch_available_queues_transaction(node: ServerNode):
