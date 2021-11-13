@@ -60,7 +60,6 @@ def create_new_async_worker(node: ServerNode, queue_id: UUID):
     return new_async_worker
 
 
-# @redis_transaction
 async def _watch_available_queues_transaction(node: ServerNode):
     unwatched_queues = await _get_unwatched_queues_transaction()
     will_watch = unwatched_queues[:QUEUES_PER_NODE]
@@ -72,7 +71,6 @@ async def _watch_available_queues_transaction(node: ServerNode):
     node.watching_queues = [UUID(bytes=b) for b in will_watch]
 
 
-# @redis_transaction
 async def _get_unwatched_queues_transaction() -> List[UUID]:
     all_queues = await dao.get_all_queues()
     last_heartbeats = await dao.get_all_server_node_heartbeats()

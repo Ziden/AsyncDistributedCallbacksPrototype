@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from enum import Enum
 from typing import Dict, Optional, List
 from uuid import UUID
@@ -28,10 +28,10 @@ class RedisKeys:
 
 class RedisDao:
     _connection: Redis
-    proxy: Optional[Redis]
+    _pipeline: Optional[Redis]
 
     def __init__(self):
-        self.proxy = None
+        self._pipeline = None
         self._connection = None
 
     def connect(self):
@@ -42,7 +42,7 @@ class RedisDao:
     def get_connection(self):
         if not self._connection:
             self.connect()
-        return self.proxy or self._connection
+        return self._pipeline or self._connection
 
 
 _dao = RedisDao()
@@ -99,17 +99,13 @@ async def get_all_server_node_heartbeats() -> Dict[bytes, int]:
     return {k: int(v) for k, v in all_nodes.items()}
 
 
-@contextmanager
-def redis_transaction(*watched_keys):
-    # A proxy is already open, so we use the parent proxy
-    if _dao.proxy is not None:
-        _dao.proxy.watch(*watched_keys)
-        yield
-        return
+@asynccontextmanager
+async def redis_transaction(*watched_keys):
     pipe = _dao.get_connection().pipeline(True)
-    pipe.watch(*watched_keys)
-    _dao.proxy = pipe
+    await pipe.watch(*watched_keys)
+    pipe.multi()
+    _dao._pipeline = pipe
     yield
-    asyncio.run(pipe.execute(True))
-    _dao.proxy = None
+    await pipe.execute(True)
+    _dao._pipeline = None
 
