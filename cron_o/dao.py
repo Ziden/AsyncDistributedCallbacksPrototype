@@ -56,12 +56,20 @@ _dao = RedisDao()
 @asynccontextmanager
 async def redis_transaction(*watched_keys):
     pipe = _dao.writer().pipeline(True)
-    await pipe.watch(*watched_keys)
+    if watched_keys:
+        await pipe.watch(*watched_keys)
     pipe.multi()
     _dao._pipeline = pipe
     yield
     await pipe.execute(True)
     _dao._pipeline = None
+
+
+@contextmanager
+def require_transaction():
+    if not _dao._pipeline:
+        raise Exception("Not in transaction")
+    yield
 
 
 async def connect():
@@ -87,22 +95,32 @@ async def get_all_queues() -> Dict[bytes, bytes]:
     return await _dao.reader().hgetall(RedisKeys.QUEUE_WATCHERS)
 
 
+@require_transaction()
 async def add_scheduled_call(queue_id: bytes, scheduled_call: ScheduledCall):
     if not await _dao.reader().hexists(RedisKeys.QUEUE_WATCHERS, queue_id):
         await create_queue(queue_id)
-    await _dao.writer().zadd(RedisKeys.queue(queue_id), {scheduled_call.pack(): scheduled_call.call_timestamp_millis})
+    sorted_set_data = {
+        scheduled_call.call_id.bytes: scheduled_call.call_timestamp_millis
+    }
+    await _dao.writer().zadd(RedisKeys.queue(queue_id), sorted_set_data)
+    await _flag_queue_modified(queue_id)
 
 
-async def get_all_scheduled_calls(queue_id: bytes):
-    return await _dao.writer().zrange(RedisKeys.queue(queue_id), "-inf", "+inf")
+async def get_scheduled_calls(queue_id: bytes, min_timestamp: int, max_timestamp: int):
+    return await _dao.reader().zrange(RedisKeys.queue(queue_id), min_timestamp, max_timestamp)
+
+
+async def _flag_queue_modified(queue_id: bytes):
+    await _dao.writer().lpush(RedisKeys.NEW_CALLS, queue_id)
+
+
+async def get_modified_queues():
+    return await _dao.reader().lrange(RedisKeys.NEW_CALLS, 0, 5)
 
 
 async def create_queue(queue_id: bytes):
     await _dao.writer().hset(RedisKeys.QUEUE_WATCHERS, queue_id, "")
 
-
-async def add_new_call_to_queue():
-    await _dao.writer().lpush()
 
 ##############
 # Heartbeats #

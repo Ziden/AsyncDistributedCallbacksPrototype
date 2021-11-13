@@ -21,6 +21,16 @@ async def test_adding_call_inserts_in_sorted_set():
     call.call_id = uuid4()
     queue_id = uuid4()
     await api.add_scheduled_call_transaction(queue_id, call)
-    queues = await dao.get_all_queues()
 
-    assert queue_id.bytes in queues
+    calls = await dao.get_scheduled_calls(queue_id.bytes, 0, -1)
+    assert call.call_id.bytes in calls
+
+
+@pytest.mark.asyncio
+async def test_adding_call_flag_queue_modified():
+    call = ScheduledCall()
+    call.call_id = uuid4()
+    queue_id = uuid4()
+    await api.add_scheduled_call_transaction(queue_id, call)
+
+    assert queue_id.bytes in await dao.get_modified_queues()

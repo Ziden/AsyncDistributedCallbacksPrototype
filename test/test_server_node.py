@@ -33,6 +33,7 @@ async def test_node_creating_one_task_per_queue():
 
 @pytest.mark.asyncio
 async def test_max_queue_limit_per_node():
+    server_nodes.QUEUES_PER_NODE = 5
     for i in range(server_nodes.QUEUES_PER_NODE + 5):
         queue_id = uuid4()
         await dao.create_queue(queue_id.bytes)
