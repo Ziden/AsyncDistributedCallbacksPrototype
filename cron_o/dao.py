@@ -42,7 +42,13 @@ class RedisDao:
     def get_connection(self):
         if not self._connection:
             self.connect()
-        return self._pipeline or self._connection
+        return self._connection
+
+    def writer(self):
+        return self._pipeline or self.get_connection()
+
+    def reader(self):
+        return self.get_connection()
 
 
 _dao = RedisDao()
@@ -53,36 +59,36 @@ async def connect():
 
 
 async def wipe():
-    await _dao.get_connection().flushdb(asynchronous=False)
+    await _dao.writer().flushdb(asynchronous=False)
 
 
 async def watch_queues(node_id: bytes, queue_ids: List[bytes]):
-    await _dao.get_connection().hmset(RedisKeys.QUEUE_WATCHERS, mapping={
+    await _dao.writer().hmset(RedisKeys.QUEUE_WATCHERS, mapping={
         queue_id: node_id for queue_id in queue_ids
     })
 
 
 async def get_all_queues() -> Dict[bytes, bytes]:
     """ Returns queue_id : watching_node_id"""
-    return await _dao.get_connection().hgetall(RedisKeys.QUEUE_WATCHERS)
+    return await _dao.reader().hgetall(RedisKeys.QUEUE_WATCHERS)
 
 
 async def add_scheduled_call(queue_id: bytes, scheduled_call: ScheduledCall):
-    if not await _dao.get_connection().hexists(RedisKeys.QUEUE_WATCHERS, queue_id):
+    if not await _dao.reader().hexists(RedisKeys.QUEUE_WATCHERS, queue_id):
         await create_queue(queue_id)
-    await _dao.get_connection().zadd(RedisKeys.queue(queue_id), {scheduled_call.pack(): scheduled_call.call_timestamp_millis})
+    await _dao.writer().zadd(RedisKeys.queue(queue_id), {scheduled_call.pack(): scheduled_call.call_timestamp_millis})
 
 
 async def get_all_scheduled_calls(queue_id: bytes):
-    return await _dao.get_connection().zrange(RedisKeys.queue(queue_id), "-inf", "+inf")
+    return await _dao.writer().zrange(RedisKeys.queue(queue_id), "-inf", "+inf")
 
 
 async def create_queue(queue_id: bytes):
-    await _dao.get_connection().hset(RedisKeys.QUEUE_WATCHERS, queue_id, "")
+    await _dao.writer().hset(RedisKeys.QUEUE_WATCHERS, queue_id, "")
 
 
 async def add_new_call_to_queue():
-    await _dao.get_connection().lpush()
+    await _dao.writer().lpush()
 
 ##############
 # Heartbeats #
@@ -90,18 +96,18 @@ async def add_new_call_to_queue():
 
 
 async def do_heartbeat(node_id: bytes):
-    await _dao.get_connection().hset(RedisKeys.NODES_LAST_TICKS, node_id.bytes, get_current_time_millis())
+    await _dao.writer().hset(RedisKeys.NODES_LAST_TICKS, node_id.bytes, get_current_time_millis())
 
 
 async def get_all_server_node_heartbeats() -> Dict[bytes, int]:
     """ Returns a dictionary of node_ids to the last timestamp in millis that node has sent a beat """
-    all_nodes = await _dao.get_connection().hgetall(RedisKeys.NODES_LAST_TICKS)
+    all_nodes = await _dao.reader().hgetall(RedisKeys.NODES_LAST_TICKS)
     return {k: int(v) for k, v in all_nodes.items()}
 
 
 @asynccontextmanager
 async def redis_transaction(*watched_keys):
-    pipe = _dao.get_connection().pipeline(True)
+    pipe = _dao.writer().pipeline(True)
     await pipe.watch(*watched_keys)
     pipe.multi()
     _dao._pipeline = pipe
