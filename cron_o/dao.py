@@ -6,8 +6,9 @@ from uuid import UUID
 
 import aioredis
 from aioredis import Redis
+
+from cron_o import ScheduledCall
 from cron_o.time_utils import get_current_time_millis
-from main import ScheduledCall
 
 
 class RedisKeys:
