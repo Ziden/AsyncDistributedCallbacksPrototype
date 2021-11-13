@@ -38,11 +38,10 @@ class RedisDao:
         self._connection = aioredis.Redis.from_url(
             "redis://localhost", max_connections=10, encoding='utf-8'
         )
+        return self._connection
 
     def get_connection(self):
-        if not self._connection:
-            self.connect()
-        return self._connection
+        return self._connection or self.connect()
 
     def writer(self):
         return self._pipeline or self.get_connection()
@@ -54,8 +53,23 @@ class RedisDao:
 _dao = RedisDao()
 
 
+@asynccontextmanager
+async def redis_transaction(*watched_keys):
+    pipe = _dao.writer().pipeline(True)
+    await pipe.watch(*watched_keys)
+    pipe.multi()
+    _dao._pipeline = pipe
+    yield
+    await pipe.execute(True)
+    _dao._pipeline = None
+
+
 async def connect():
     await _dao.connect()
+
+
+def get_dao():
+    return _dao
 
 
 async def wipe():
@@ -103,15 +117,4 @@ async def get_all_server_node_heartbeats() -> Dict[bytes, int]:
     """ Returns a dictionary of node_ids to the last timestamp in millis that node has sent a beat """
     all_nodes = await _dao.reader().hgetall(RedisKeys.NODES_LAST_TICKS)
     return {k: int(v) for k, v in all_nodes.items()}
-
-
-@asynccontextmanager
-async def redis_transaction(*watched_keys):
-    pipe = _dao.writer().pipeline(True)
-    await pipe.watch(*watched_keys)
-    pipe.multi()
-    _dao._pipeline = pipe
-    yield
-    await pipe.execute(True)
-    _dao._pipeline = None
 
