@@ -12,18 +12,19 @@ from main import ScheduledCall
 
 class RedisKeys:
     # All nodes and their last ticks
-    NODES_LAST_TICKS = "server-nodes"
+    NODES_LAST_TICKS = "node::ticks"
     # All queues and which node is watching it
-    QUEUE_WATCHERS = "job-queues"
+    QUEUE_WATCHERS = "queue::node"
     # Fifo list of new calls to be added
-    NEW_CALLS = "new-calls"
+    NEW_CALLS = "calls:list"
     # Queue sorted sets of scheduled calls
-    SORTED_SET = "queue-{}"
+    @staticmethod
+    def queue_sorted_set(queue_id: bytes):
+        return f"queue:{queue_id}"
 
     @staticmethod
-    def queue(queue_id: bytes):
-        queue_id_int = int.from_bytes(queue_id, byteorder='big', signed=True)
-        return RedisKeys.SORTED_SET.format(queue_id_int)
+    def queue_modification_list(queue_id: bytes):
+        return f"queue:mod:{queue_id}"
 
 
 class RedisDao:
@@ -102,15 +103,16 @@ async def add_scheduled_call(queue_id: bytes, scheduled_call: ScheduledCall):
     sorted_set_data = {
         scheduled_call.call_id.bytes: scheduled_call.call_timestamp_millis
     }
-    await _dao.writer().zadd(RedisKeys.queue(queue_id), sorted_set_data)
+    await _dao.writer().zadd(RedisKeys.queue_sorted_set(queue_id), sorted_set_data)
     await _flag_queue_modified(queue_id)
 
 
 async def get_scheduled_calls(queue_id: bytes, min_timestamp: int, max_timestamp: int):
-    return await _dao.reader().zrange(RedisKeys.queue(queue_id), min_timestamp, max_timestamp)
+    return await _dao.reader().zrange(RedisKeys.queue_sorted_set(queue_id), min_timestamp, max_timestamp)
 
 
 async def _flag_queue_modified(queue_id: bytes):
+    await _dao.writer().lpush(RedisKeys.NEW_CALLS, queue_id)
     await _dao.writer().lpush(RedisKeys.NEW_CALLS, queue_id)
 
 

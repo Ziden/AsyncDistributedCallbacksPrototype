@@ -28,13 +28,21 @@ class ServerNode:
         self.watching_queues = []
         self.workers = []
         self.looping = False
+        self.loop = asyncio.get_running_loop()
 
 
 async def create_server_node() -> ServerNode:
     node = ServerNode(uuid4())
     logging.info("New Server Node Spawned")
     await _watch_available_queues_transaction(node)
+    node.loop.create_task(new_calls_listener(node))
     return node
+
+
+async def new_calls_listener(node: ServerNode):
+    while node.looping:
+        dao.get_scheduled_calls()
+        await asyncio.wait(1)
 
 
 async def _watch_available_queues_transaction(node: ServerNode):
