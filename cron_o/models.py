@@ -1,36 +1,38 @@
-from dataclasses import dataclass
+from copy import copy
 from typing import Union, Dict
-from uuid import UUID
 
 import msgpack
 
+from cron_o.dao import OneKeyObject, StreamObject
+from cron_o.time_utils import is_due
 
-class ScheduledCall:
-    call_id: UUID
-    queue_id: UUID
+
+class ScheduledCall(OneKeyObject, StreamObject):
+    call_id: bytes
+    queue_id: bytes
     call_timestamp_millis: int
-    call_action: int
     call_params: Dict[str, Union[str, int]]
 
-    def __init__(self):
-        self.call_id = None
+    def __init__(self, call_id: bytes = 0):
+        self.call_id = call_id
         self.call_timestamp_millis: int = 0
         self.call_action: int = 0
         self.queue_id = None
         self.call_params: Dict[str, Union[str, int]] = {}
 
-    def pack(self) -> bytes:
-        data = {}
-        data.update(vars(self))
-        data["call_id"] = data["call_id"].bytes
-        data["queue_id"] = data["queue_id"].bytes
-        return msgpack.packb(data)
+    def get_object_key(self) -> str:
+        return f"call:{self.call_id}"
 
-    @classmethod
-    def unpack(cls, bytes: bytes):
-        instance = cls()
-        data = msgpack.unpackb(bytes)
-        vars(instance).update(data)
-        instance.call_id = UUID(instance.call_id)
-        instance.queue_id = UUID(instance.queue_id)
-        return instance
+    def is_due(self):
+        return is_due(self.call_timestamp_millis)
+
+    def from_dict(self, input_dict: Dict):
+        super().from_dict(input_dict)
+        self.call_params = msgpack.unpackb(input_dict[b"call_params"])
+        self.call_timestamp_millis = int(self.call_timestamp_millis)
+        return self
+
+    def to_dict(self):
+        dict = copy(vars(self))
+        dict["call_params"] = msgpack.packb(self.call_params)
+        return dict

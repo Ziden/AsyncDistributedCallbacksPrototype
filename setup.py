@@ -1,23 +1,16 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
-import multiprocessing  # To make python setup.py test happy
-import os
-import shutil
-import subprocess
-
-from distutils.command.clean import clean
 from setuptools import find_packages
 from setuptools import setup
 
-multiprocessing
 
 PACKAGE = 'Cron-o'
-__version__ = None
+__version__ = '0.1'
 
 
 setup(
     name=PACKAGE,
+    python_requires='>3.8.0',
     version=__version__,
     description='Cron-o',
     long_description=open('README.md').read(),
@@ -35,5 +28,6 @@ setup(
     install_requires=[
         'aioredis',
         'asyncio',
+        'msgpack'
     ],
 )

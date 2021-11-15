@@ -1,37 +1,33 @@
 import asyncio
 from time import sleep
 from uuid import uuid4
+
 import pytest
 from aioredis import WatchError
 
-from cron_o import dao, server_nodes, api
-from cron_o.dao import redis_transaction, RedisKeys
+from cron_o.dao import async_transaction, writer, reader, _dao
 
 
 @pytest.mark.asyncio
 async def test_write_transaction():
-    async with redis_transaction(RedisKeys.QUEUE_WATCHERS):
-        queue_id = uuid4()
-        await dao.create_queue(queue_id.bytes)
+    async with async_transaction("A"):
+        await writer().set("A", "1")
 
-    node = await server_nodes.create_server_node()
-    assert queue_id in node.watching_queues
+    assert await reader().get("A")
 
 
 @pytest.mark.asyncio
-async def test_read_transaction():
-    queue_id = uuid4()
-    async with redis_transaction(RedisKeys.QUEUE_WATCHERS):
-        await dao.create_queue(queue_id.bytes)
-        await server_nodes.create_server_node()
+async def test_read_transaction_no_cache():
+    async with async_transaction("A"):
+        await writer().set("A", "1")
+        assert not await reader().get("A")
 
-        assert queue_id.bytes not in await dao.get_all_queues()
-    assert queue_id.bytes in await dao.get_all_queues()
+    assert await reader().get("A")
 
 
 @pytest.mark.asyncio
 async def test_watch_error():
-    queue_id = uuid4()
-    async with redis_transaction(RedisKeys.QUEUE_WATCHERS):
-        await dao.create_queue(queue_id.bytes)
+    with pytest.raises(WatchError):
+        async with async_transaction("A"):
+                await _dao.get_connection().set("A", 1)
 

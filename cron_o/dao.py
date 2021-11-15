@@ -1,33 +1,56 @@
+import abc
 from contextlib import contextmanager, asynccontextmanager
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Union
 
 import aioredis
 from aioredis import Redis
-
-from cron_o import ScheduledCall
-from cron_o.time_utils import get_current_time_millis
+from aioredis.client import Pipeline
 
 
-class RedisKeys:
-    # All nodes and their last ticks
-    NODES_LAST_TICKS = "node::ticks"
-    # All queues and which node is watching it
-    QUEUE_WATCHERS = "queue::node"
-    # Fifo list of new calls to be added
-    NEW_CALLS = "calls:new:list"
-    # Hashmap of all calls
-    CALLS = "calls:all:list"
-
-    @staticmethod
-    def queue_sorted_set(queue_id: bytes):
-        return f"queue:{queue_id}"
-
-    @staticmethod
-    def queue_modification_list(queue_id: bytes):
-        return f"queue:mod:{queue_id}"
+class StreamObject:
+    stream_id: bytes
 
 
-class RedisDao:
+class OneKeyObject:
+
+    @abc.abstractmethod
+    def get_object_key(self):
+        pass
+
+    @abc.abstractmethod
+    def to_dict(self):
+        return vars(self)
+
+    @abc.abstractmethod
+    def from_dict(self, input_dict: Dict):
+        decoded = {}
+        for k, v in input_dict.items():
+            try:
+                decoded_val = v.decode()
+            except (UnicodeDecodeError, AttributeError):
+                decoded[k.decode()] = v
+                continue
+            if decoded_val.isdigit():
+                decoded_val = int(decoded_val)
+            decoded[k.decode()] = decoded_val
+        vars(self).update(decoded)
+
+    def get_expiry_seconds(self):
+        return 0
+
+    async def serialize(self, io_writer: Union[Redis, Pipeline]):
+        key = self.get_object_key()
+        await io_writer.hmset(key, self.to_dict())
+        expiry = self.get_expiry_seconds()
+        if expiry:
+            await io_writer.expire(key, expiry)
+
+    async def deserialize(self, io_reader: Redis):
+        self.from_dict(await io_reader.hgetall(self.get_object_key()))
+        return self
+
+
+class _RedisDao:
     _connection: Redis
     _pipeline: Optional[Redis]
 
@@ -50,25 +73,31 @@ class RedisDao:
     def reader(self):
         return self.get_connection()
 
+    def set_transaction_pipeline(self, pipe: Pipeline):
+        self._pipeline = pipe
 
-_dao = RedisDao()
+    def is_in_transaction(self):
+        return self._pipeline
+
+
+_dao = _RedisDao()
 
 
 @asynccontextmanager
-async def redis_transaction(*watched_keys):
+async def async_transaction(*watched_keys):
     pipe = _dao.writer().pipeline(True)
     if watched_keys:
         await pipe.watch(*watched_keys)
     pipe.multi()
-    _dao._pipeline = pipe
+    _dao.set_transaction_pipeline(pipe)
     yield
     await pipe.execute(True)
-    _dao._pipeline = None
+    _dao.set_transaction_pipeline(None)
 
 
 @contextmanager
 def require_transaction():
-    if not _dao._pipeline:
+    if not _dao.is_in_transaction():
         raise Exception("Not in transaction")
     yield
 
@@ -77,79 +106,13 @@ async def connect():
     await _dao.connect()
 
 
-def get_dao():
-    return _dao
-
-
 async def wipe():
     await _dao.writer().flushdb(asynchronous=False)
 
 
-async def watch_queues(node_id: bytes, queue_ids: List[bytes]):
-    await _dao.writer().hmset(RedisKeys.QUEUE_WATCHERS, mapping={
-        queue_id: node_id for queue_id in queue_ids
-    })
+def writer():
+    return _dao.writer()
 
 
-async def get_all_queues() -> Dict[bytes, bytes]:
-    """ Returns queue_id : watching_node_id"""
-    return await _dao.reader().hgetall(RedisKeys.QUEUE_WATCHERS)
-
-
-@require_transaction()
-async def add_scheduled_call(call: ScheduledCall):
-    queue_id = call.queue_id.bytes
-    if not await _dao.reader().hexists(RedisKeys.QUEUE_WATCHERS, queue_id):
-        await create_queue(queue_id)
-    call_id = call.call_id.bytes
-    sorted_set_data = {
-        call_id: call.call_timestamp_millis
-    }
-    await _dao.writer().hset(RedisKeys.CALLS, call_id, call.pack())
-    await _dao.writer().zadd(RedisKeys.queue_sorted_set(queue_id), sorted_set_data)
-    await _flag_queue_modified(queue_id, call_id)
-
-
-async def get_scheduled_calls(queue_id: bytes, min_timestamp: int, max_timestamp: int):
-    return await _dao.reader().zrange(RedisKeys.queue_sorted_set(queue_id), min_timestamp, max_timestamp)
-
-
-async def _flag_queue_modified(queue_id: bytes, call_id: bytes):
-    await _dao.writer().lpush(RedisKeys.NEW_CALLS, queue_id)
-    await _dao.writer().lpush(RedisKeys.queue_modification_list(queue_id), call_id)
-
-
-async def _add_new_call(call: ScheduledCall):
-    pass
-
-
-async def get_modified_queues():
-    return await _dao.reader().lrange(RedisKeys.NEW_CALLS, 0, 5)
-
-
-async def get_new_calls_in_queue(queue_id):
-    return await _dao.reader().lrange(RedisKeys.queue_modification_list(queue_id), 0, -1)
-
-
-async def block_until_new_call_received():
-    return await _dao.reader().brpop(RedisKeys.NEW_CALLS, 0, 5)
-
-
-async def create_queue(queue_id: bytes):
-    await _dao.writer().hset(RedisKeys.QUEUE_WATCHERS, queue_id, "")
-
-
-##############
-# Heartbeats #
-##############
-
-
-async def do_heartbeat(node_id: bytes):
-    await _dao.writer().hset(RedisKeys.NODES_LAST_TICKS, node_id.bytes, get_current_time_millis())
-
-
-async def get_all_server_node_heartbeats() -> Dict[bytes, int]:
-    """ Returns a dictionary of node_ids to the last timestamp in millis that node has sent a beat """
-    all_nodes = await _dao.reader().hgetall(RedisKeys.NODES_LAST_TICKS)
-    return {k: int(v) for k, v in all_nodes.items()}
-
+def reader():
+    return _dao.reader()

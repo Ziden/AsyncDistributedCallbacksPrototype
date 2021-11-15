@@ -6,4 +6,4 @@ def get_current_time_millis() -> int:
 
 
 def is_due(timestamp: int):
-    return timestamp > get_current_time_millis()
+    return timestamp < get_current_time_millis()
