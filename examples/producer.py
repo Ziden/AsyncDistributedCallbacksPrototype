@@ -12,17 +12,21 @@ logging.root.setLevel(logging.NOTSET)
 logging.basicConfig(level=logging.NOTSET)
 
 
-dao.wipe()
-
 
 # one worker example
 async def main_loop():
     logging.info("Starting main loop")
     queue_id = b'\xFF\x00'
-    while True:
-        await asyncio.sleep(1000)
-        call = generate_call(time_utils.get_current_time_millis() + random.randrange(-1000))
+    for i in range(100000):
+        call = generate_call(time_utils.get_current_time_millis() + 500 - random.randrange(1000))
         call.queue_id = queue_id
+        stream.setup_context(queue_id)
+        print("Sending call")
+        await stream.add(call)
+
+    print("DONE")
+    await asyncio.sleep(1000)
+
 
 if __name__ == "__main__":
     asyncio.run(main_loop())

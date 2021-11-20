@@ -108,6 +108,7 @@ class AsyncCallbackQueue:
 
     async def _run_call_task(self, call: ScheduledCall):
         self.info("Running call", call_id=call.call_id)
+        await asyncio.sleep(10)
 
     def next_call_time(self):
         return self.next_call.call_timestamp_millis if self.next_call else 0
